@@ -1,4 +1,4 @@
--- localizations
+-- localized variable optimization
 local select = select 
 local format_string = string.format 
 local concat = table.concat 
@@ -10,7 +10,9 @@ local tostring = tostring
 local math_log = math.log
 local math_ceil = math.ceil 
 
+-- the global table for the encoder
 local spon = {}
+if _G then _G.spon = spon end
 
 --
 -- caches
@@ -205,7 +207,7 @@ spon.decode = function(str)
 	return empty_cache(cache_array, decoder['{'](str, 1, cache_array))
 end
 
-spon.printtable = function(tbl, indent)
+spon.printtable = function(tbl, indent) -- debug utility
 	if indent == nil then 
 		return spon.printtable(tbl, 0)
 	end
@@ -219,13 +221,4 @@ spon.printtable = function(tbl, indent)
 	end
 end
 
-local encoded = spon.encode {
-	1,2,3, 'test test test', 'test test test', 'foovarenaefnpepnf', 123, 'veanfpnap', 149343, {
-		'test', 'test2', 'test3',
-		y = true,
-		b = false
-	}
-}	
-print (encoded)
-spon.printtable(spon.decode(encoded))
 return spon
