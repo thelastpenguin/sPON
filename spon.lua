@@ -9,25 +9,50 @@ local tonumber = tonumber
 local tostring = tostring 
 local math_log = math.log
 local math_ceil = math.ceil 
+
+local spon = {}
+
+--
 -- caches
+-- 
+local max_stack = 128
+local max_format_strings = max_stack + 32
 
-	local max_stack = 128
-	local max_format_strings = max_stack + 32
+-- string format string
+local concat_format_strings = {'%s'}
+for i = 2, max_format_strings do concat_format_strings[i] = concat_format_strings[i - 1] .. '%s' end
 
-	-- string format string
-	local concat_format_strings = {'%s'}
-	for i = 2, max_format_strings do concat_format_strings[i] = concat_format_strings[i - 1] .. '%s' end
-
-	-- hex number cache
-	local hex_cache = {} for i = 0, 15 do hex_cache[format_string('%x', i)] = i end 
+-- hex number cache
+local hex_cache = {} for i = 0, 15 do hex_cache[format_string('%x', i)] = i end 
 
 
-local spon2 = {}
+local cache_hashy = setmetatable({}, {__mode = 'kv'})
+local cache_array = setmetatable({}, {__mode = 'kv'})
 
+local function empty_cache(hashy, a)
+	--for i = #hashy, 1, -1 do
+	--	hashy[i] = nil
+	--end
+	for k,v in pairs(hashy) do
+		hashy[k] = nil
+	end
+	return a
+end
+
+
+
+
+--
+-- ENCODER FUNCTIONS
+-- 
 
 local encoder = {}
 
 local log16 = math_log(16)
+
+local function encoder_write_pointer(index)
+	return format_string('#%x%x', math_ceil(math_log(index + 1) / log16), index)
+end
 
 encoder['number'] = function(value)
 	if value % 1 == 0 then
@@ -47,12 +72,22 @@ encoder['number'] = function(value)
 end
 
 encoder['string'] = function(value, cache)
+	if cache[value] then 
+		return encoder_write_pointer(cache[value])
+	end
+	cache[#cache + 1] = value
+	cache[value] = #cache
+
 	local len = len(value)
 	if len >= 16 * 16 then
 		return format_string('T%06X%s', len, value)
 	else
 		return format_string('S%02X%s', len, value)
 	end
+end
+
+encoder['boolean'] = function(value, cache)
+	return value and 't' or 'f'
 end
 
 
@@ -95,69 +130,102 @@ local function encode_sequential(size, table, key, cache)
 end
 
 encoder['table'] = function(value, cache)
-	if cache[value] then
-		return format_string('(%x)', value)
+	if cache[value] then 
+		return encoder_write_pointer(value)
 	end
-	return fast_concat_stack(fast_concat_stack('{',encode_sequential(1, value, 0, cache)))
+	cache[#cache + 1] = value
+	cache[value] = #cache
+	return fast_concat_stack(fast_concat_stack('{', encode_sequential(1, value, 0, cache)))
 end
 
 local decoder = {}
 -- a short string with a 2-digit length component
 decoder['S'] = function(str, index, cache)
 	local strlen = tonumber(string_sub(str, index + 1, index + 2), 16)
-	return string_sub(index + 3, index + 3 + strlen), index + (3 + 1) + strlen
+	local str = string_sub(str, index + 3, index + (3 - 1) + strlen)
+	cache[#cache + 1] = str
+	return str, index + (3) + strlen
 end
 -- a long string with a 6-digit length component
 decoder['T'] = function(str, index, cache)
 	local strlen = tonumber(string_sub(str, index + 1, index + 6), 16)
-	return string_sub(index + 3, index + 3), index + (7 + 1) + strlen -- figure out if alignment is off i think its right
+	return string_sub(str, index + 7, index + (7 - 1) + strlen), index + (7) + strlen -- figure out if alignment is off i think its right
 end
+-- decoder for an integer value
 decoder['I'] = function(str, index, cache)
 	local digitCount = hex_cache[string_sub(str, index+1, index+1)]
 	if digitCount == 0 then return 0, index + 1 end
-	return tonumber(string_sub(str, index + 2, index + 1 + digitCount), 16), (2 + digitCount + 2)
+	return tonumber(string_sub(str, index + 2, index + 1 + digitCount), 16), index + (2 + digitCount)
+end
+-- decoder for a boolean
+decoder['t'] = function(str, index) return true, index + 1 end
+decoder['f'] = function(str, index) return false, index + 1 end
+decoder['#'] = function(str, index, cache)
+	local digitCount = hex_cache[string_sub(str, index+1, index+1)]
+	return cache[tonumber(string_sub(str, index + 2, index + 1 + digitCount), 16)], index + (2 + digitCount)
 end
 
 decoder['{'] = function(str, index, cache)
-	index = index + 1
 	local table = {}
+	cache[#cache + 1] = cache
+
+	index = index + 1
 
 	-- decode the array portion of the table
 	local i = 1
 	while true do
 		local c = string_sub(str, index, index)
 		if c == '~' or c == '}' or c == nil then break end
-		print(str, index, c)
 		table[i], index = decoder[c](str, index, cache)
 		i = i + 1
 	end
 
-	-- decode the key-value poriton of the table
-	local k
-	while true do
-		local c = string_sub(str, index, index)
-		if c == '}' or c == nil then break end
-		k, index = decoder[c](str, index, cache)
-		c = string_sub(str, index, index)
-		table[k], index = decoder[c](str, index, cache)
+	if string_sub(str, index, index) == '~' then
+		-- decode the key-value poriton of the table
+		index = index + 1
+		local k
+		while true do
+			local c = string_sub(str, index, index)
+			if c == '}' or c == nil then break end
+			k, index = decoder[c](str, index, cache)
+			c = string_sub(str, index, index)
+			table[k], index = decoder[c](str, index, cache)
+		end
+
 	end
 
 	return table, index
 end
 
-
-
-
-spon2.encode = function(table)
-	return encoder.table(table, {})
+spon.encode = function(table)
+	return empty_cache(cache_hashy, encoder.table(table, cache_hashy))
 end
 
-spon2.decode = function(str)
-	return decoder['{'](str, 0, {})
+spon.decode = function(str)
+	return empty_cache(cache_array, decoder['{'](str, 1, cache_array))
 end
 
-local encoded = spon2.encode {1,2,3}
+spon.printtable = function(tbl, indent)
+	if indent == nil then 
+		return spon.printtable(tbl, 0)
+	end
+	local lpad = string.format('%'..indent..'s', '')
+
+	for k,v in pairs(tbl) do
+		print(lpad .. '- ' .. string_sub(type(k), 1, 1) .. ':' .. tostring(k) .. ' = ' .. string_sub(type(v), 1, 1) .. ':' .. tostring(v))
+		if type(v) == 'table' then
+			spon.printtable(v, indent + 4)
+		end
+	end
+end
+
+local encoded = spon.encode {
+	1,2,3, 'test test test', 'test test test', 'foovarenaefnpepnf', 123, 'veanfpnap', 149343, {
+		'test', 'test2', 'test3',
+		y = true,
+		b = false
+	}
+}	
 print (encoded)
-print (spon2.encode(spon2.decode(encoded)))
-
-return spon2
+spon.printtable(spon.decode(encoded))
+return spon
