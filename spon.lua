@@ -1,3 +1,46 @@
+
+--           -- COPYRIGHT HEADER --
+-- spon2.lua 1.0.0 by thelastpenguin
+-- Copyright 2016 Gareth George
+--                aka thelastpenguin
+-- 
+-- GitHub release: https://github.com/thelastpenguin/spon
+--
+-- You may use this in any purpose / include it in any project so long as the
+-- following conditions are met:
+--    - You do not remove this copyright notice
+--    - You don't claim this to be your own
+--    - You properly credit the author (thelastpenguin aka gareth george) if you publish your work
+--      based on (and/or using) this.
+--
+-- If you modify this code in any way this copyright still applies to the modifications or any 
+-- derived pieces of code
+-- 
+-- The author may not be held responsibile for any damages or losses directly or indirectly caused 
+-- by the use of spon
+-- If you disagree with any of these limitations you're free not to use the code!
+-- 
+--
+-- 
+--           -- COMPATABILITY MODE --
+-- compatability with alternative encoders:
+--    - util.TableFromJSON
+--    - von by Vericas https://github.com/vercas/vON/blob/master/von.lua
+--    - pon1 by thelastpenguin https://github.com/thelastpenguin/gLUA-Library/blob/master/pON/pON-recommended.lua
+--  
+--           -- DATA TYPES --
+-- All of the following data types are supported as both keys and values
+-- References are preserved i.e. if the same object appears twice it will be encoded as the same object
+-- Cycles will not result in infinite recursion
+-- 
+-- Data Types:
+--    - boolean
+--    - numbers (integers, floats)
+--    - strings
+--    - table
+--    - nil
+
+
 -- localized variable optimization
 local select = select 
 local format_string = string.format 
@@ -9,6 +52,9 @@ local tonumber = tonumber
 local tostring = tostring 
 local math_log = math.log
 local math_ceil = math.ceil 
+local next = next 
+local ipairs = ipairs 
+local pairs = pairs 
 
 -- the global table for the encoder
 local spon = {}
@@ -17,33 +63,44 @@ if _G then _G.spon = spon end
 --
 -- caches
 -- 
-local max_stack = 128
-local max_format_strings = max_stack + 32
 
--- string format string
-local concat_format_strings = {'%s'}
-for i = 2, max_format_strings do concat_format_strings[i] = concat_format_strings[i - 1] .. '%s' end
-
--- hex number cache
 local hex_cache = {} for i = 0, 15 do hex_cache[format_string('%x', i)] = i end 
 
-
-local cache_hashy = setmetatable({}, {__mode = 'kv'})
-local cache_array = setmetatable({}, {__mode = 'kv'})
+local cache = {}
+local cache_size = 0
+local output_buffer = setmetatable({}, {__mode = 'v'})
 
 local function empty_cache(hashy, a)
-	--for i = #hashy, 1, -1 do
-	--	hashy[i] = nil
-	--end
-	for k,v in pairs(hashy) do
-		hashy[k] = nil
-	end
+	cache_size = 0
+	for k,v in pairs(hashy) do hashy[k] = nil end
 	return a
 end
 
+local function empty_output_buffer(buffer, a)
+	for k,v in ipairs(buffer) do buffer[k] = nil end
+	return a
+end
 
+-- 
+-- COMPATABILITY MODES
+-- 
 
+local compatability = {}
 
+do 	
+	local function safeload(lib) local _, a = pcall(require, lib) return a end 
+
+	-- von compatability
+	_G.von = _G.von or safeload('von')
+	if von and von.serialize then compatability.vonDeserialize = von.deserialize end
+
+	-- pon compatability
+	_G.pon = _G.pon or safeload('pon')
+	if pon and pon.decode then compatability.ponDecode = pon.decode end
+
+	-- json compatability 
+	if util and util.JSONToTable then compatability.JSONToTable = util.JSONToTable end
+end 
 --
 -- ENCODER FUNCTIONS
 -- 
@@ -53,91 +110,135 @@ local encoder = {}
 local log16 = math_log(16)
 
 local function encoder_write_pointer(index)
-	return format_string('#%x%x', math_ceil(math_log(index + 1) / log16), index)
+	return format_string('@%x%x', math_ceil(math_log(index + 1) / log16), index)
 end
 
-encoder['number'] = function(value)
+encoder['number'] = function(value, output, index)
 	if value % 1 == 0 then
 		if value == 0 then return 'I0' end
 		if value < 0 then
-			return format_string('i%x%x', math_ceil(math_log(-value+1) / (log16)), -value)
+			output[index] = format_string('i%x%x', math_ceil(math_log(-value+1) / (log16)), -value)
 		else
-			return format_string('I%x%x', math_ceil(math_log(value+1) / (log16)), value)
+			output[index] = 'I0'
+			output[index] = format_string('I%x%x', math_ceil(math_log(value+1) / (log16)), value)
 		end
 	else
-		if value < 0 then
-			return 'f' .. tostring(-value) .. ';'
-		else
-			return 'F' .. tostring(value) .. ';'
-		end
+		output[index] = tostring(value) -- use a base10 tostring representation if it has decimals
 	end
-end
 
-encoder['string'] = function(value, cache)
-	if cache[value] then 
-		return encoder_write_pointer(cache[value])
+	return index + 1
+end
+local encode_number = encoder['number']
+
+encoder['string'] = function(value, output, index)
+	if cache[value] then
+		output[index] = encoder_write_pointer(cache[value])
 	end
-	cache[#cache + 1] = value
-	cache[value] = #cache
+	cache_size = cache_size + 1
+	cache[value] = cache_size
 
 	local len = len(value)
 	if len >= 16 * 16 then
-		return format_string('T%06X%s', len, value)
+		output[index] = format_string('T%06X%s', len, value)
 	else
-		return format_string('S%02X%s', len, value)
+		output[index] = format_string('S%02X%s', len, value)
 	end
+	return index + 1
 end
 
-encoder['boolean'] = function(value, cache)
-	return value and 't' or 'f'
+encoder['boolean'] = function(value, output, index)
+	output[index] = value and 't' or 'f'
+	return index + 1
 end
 
-
-local function fast_concat_stack(...)
-	local size = select('#', ...)
-	local last = select(size, ...)
-	if size == 1 then
-		return ...
-	elseif type(last) == 'function' then -- must never be greater than concat_format_strings count!!!
-		return format_string(concat_format_strings[size-1], ...), fast_concat_stack(last())
-	elseif size > max_format_strings then
-		return concat {...}
-	else
-		return format_string(concat_format_strings[size], ...)
-	end
-end
-
-local function encode_pairs(size, iterator, table, key, cache)
-	if size >= max_stack then
-		return function() return encode_sequential(0, iterator, table, k, cache) end
-	end
-	local k, v = iterator(table, key)
-	if k == nil then return '}' end
-	return encoder[type(k)](k, cache), encoder[type(v)](v, cache), encode_pairs(size + 2, iterator, table, k, cache)
-end
-
-
-local function encode_sequential(size, table, key, cache)
-	if size >= max_stack then 
-		return function() return encode_sequential(0, table, key, cache) end
-	end
-
-	key = key + 1
-	local value = table[key]
-	if value == nil then 
-		return '~', encode_pairs(size + 1, pairs(table), table, key ~= 1 and key - 1 or nil, cache)
-	end
-
-	return encoder[type(value)](value, cache), encode_sequential(size + 1, table, key, cache)
-end
-
-encoder['table'] = function(value, cache)
+encoder['table'] = function(value, output, index)
 	if cache[value] then 
-		return encoder_write_pointer(value)
+		output[index] = encoder_write_pointer(cache[value])
+		return index + 1
 	end
-	cache[#cache + 1] = value
-	cache[value] = #cache
-	return fast_concat_stack(fast_concat_stack('{', encode_sequential(1, value, 0, cache)))
+
+	-- update the cache
+	cache_size = cache_size + 1
+	cache[value] = cache_size
+
+	local table_size = #value
+	local has_kv_component = next(value, table_size ~= 0 and table_size or nil)
+	
+	if table_size > 0 then
+		if has_kv_component then
+			output[index] = '('
+		else
+			output[index] = '<'
+		end
+
+		index = index + 1
+
+		for k,v in ipairs(value) do
+			index = encoder[type(v)](v, output, index)
+		end
+
+		if has_kv_component then
+			output[index] = '~'
+			index = index + 1
+		else
+			output[index] = '>'
+			return index + 1
+		end
+	else
+		output[index] = '['
+		index = index + 1
+	end
+
+	for k,v in next, value, (table_size ~= 0 and table_size or nil) do
+		index = encoder[type(k)](k, output, index)
+		index = encoder[type(v)](v, output, index)
+	end
+
+	output[index] = ')'
+
+	return index + 1 --fast_concat_stack(fast_concat_stack('{', encode_sequential(1, value, 0)))
+end
+
+encoder['nil'] = function(value, output, index)
+	output[index] = '-'
+	return index + 1
+end
+
+-- gmod specific
+if IsValid and FindMetaTable then
+	local IsValid = IsValid
+	local FindMetaTable = FindMetaTable
+	local EntIndex = FindMetaTable('Entity').EntIndex
+
+	encoder['Vector'] = function(value, output, index)
+		output[index] = 'V'
+		index = encode_number(value.x, output, index + 1)
+		index = encode_number(value.x, output, index)
+		return encode_number(value.x, output, index)
+	end
+
+	encoder['Angle'] = function(value, output, index)
+		output[index] = 'A'
+		index = encode_number(value.p, output, index + 1)
+		index = encode_number(value.y, output, index)
+		return encode_number(value.r, output, index)
+	end
+
+	encoder['Entity'] = function(value, output, index)
+		if IsValid(value) then 
+			output[index] = 'E'
+			return encode_number(EntIndex(value), index + 1)
+		else
+			return '#'
+		end
+	end
+
+	encoder['Player']  = encoder['Entity']
+	encoder['Vehicle'] = encoder['Entity']
+	encoder['Weapon']  = encoder['Entity']
+	encoder['NPC']     = encoder['Entity']
+	encoder['NextBot'] = encoder['Entity']
+
 end
 
 local decoder = {}
@@ -145,7 +246,8 @@ local decoder = {}
 decoder['S'] = function(str, index, cache)
 	local strlen = tonumber(string_sub(str, index + 1, index + 2), 16)
 	local str = string_sub(str, index + 3, index + (3 - 1) + strlen)
-	cache[#cache + 1] = str
+	cache_size = cache_size + 1
+	cache[cache_size] = str
 	return str, index + (3) + strlen
 end
 -- a long string with a 6-digit length component
@@ -159,17 +261,23 @@ decoder['I'] = function(str, index, cache)
 	if digitCount == 0 then return 0, index + 1 end
 	return tonumber(string_sub(str, index + 2, index + 1 + digitCount), 16), index + (2 + digitCount)
 end
+decoder['i'] = function(str, index, cache)
+	local digitCount = hex_cache[string_sub(str, index+1, index+1)]
+	if digitCount == 0 then return 0, index + 1 end
+	return -tonumber(string_sub(str, index + 2, index + 1 + digitCount), 16), index + (2 + digitCount)
+end
 -- decoder for a boolean
 decoder['t'] = function(str, index) return true, index + 1 end
 decoder['f'] = function(str, index) return false, index + 1 end
-decoder['#'] = function(str, index, cache)
+decoder['@'] = function(str, index)
 	local digitCount = hex_cache[string_sub(str, index+1, index+1)]
 	return cache[tonumber(string_sub(str, index + 2, index + 1 + digitCount), 16)], index + (2 + digitCount)
 end
 
-decoder['{'] = function(str, index, cache)
+decoder['('] = function(str, index)
 	local table = {}
-	cache[#cache + 1] = cache
+	cache_size = cache_size + 1
+	cache[cache_size] = table
 
 	index = index + 1
 
@@ -177,7 +285,7 @@ decoder['{'] = function(str, index, cache)
 	local i = 1
 	while true do
 		local c = string_sub(str, index, index)
-		if c == '~' or c == '}' or c == nil then break end
+		if c == '~' or c == ')' or c == nil then break end
 		table[i], index = decoder[c](str, index, cache)
 		i = i + 1
 	end
@@ -188,37 +296,116 @@ decoder['{'] = function(str, index, cache)
 		local k
 		while true do
 			local c = string_sub(str, index, index)
-			if c == '}' or c == nil then break end
+			if c == ')' or c == nil then break end
 			k, index = decoder[c](str, index, cache)
 			c = string_sub(str, index, index)
 			table[k], index = decoder[c](str, index, cache)
 		end
-
 	end
 
-	return table, index
+	return table, index + 1
 end
 
+decoder['['] = function(str, index)
+	local table = {}
+	cache_size = cache_size + 1
+	cache[cache_size] = table
+
+	-- decode the key-value poriton of the table
+	index = index + 1
+	local k
+	while true do
+		local c = string_sub(str, index, index)
+		if c == ')' or c == nil then break end
+		k, index = decoder[c](str, index, cache)
+		c = string_sub(str, index, index)
+		table[k], index = decoder[c](str, index, cache)
+	end
+
+	return table, index + 1
+end
+
+decoder['<'] = function(str, index)
+	local table = {}
+	cache_size = cache_size + 1
+	cache[cache_size] = table
+
+	index = index + 1
+
+	-- decode the array portion of the table
+	local i = 1
+	while true do
+		local c = string_sub(str, index, index)
+		if c == '>' or c == nil then break end
+		table[i], index = decoder[c](str, index, cache)
+		i = i + 1
+	end
+
+	return table, index + 1
+end
+
+decoder['-'] = function(str, index)
+	return nil, index + 1
+end
+
+
 spon.encode = function(table)
-	return empty_cache(cache_hashy, encoder.table(table, cache_hashy))
+	-- encoding its simple
+	empty_output_buffer(output_buffer)
+	empty_cache(cache)
+	encoder.table(table, output_buffer, 1)
+	return concat(output_buffer)
 end
 
 spon.decode = function(str)
-	return empty_cache(cache_array, decoder['{'](str, 1, cache_array))
+	empty_cache(cache)
+
+	local firstChar = string_sub(str, 1, 1)
+	local decoderFunc = decoder[firstChar]
+
+	if spon.noCompat then
+		return  decoderFunc(str, 1)
+	end
+
+	if not decoderFunc then
+		return spon._decodeInCompatabilityMode(str, 'did not find a decoder function to handle the string beginning with \''..tostring(firstChar)..'\'')
+	end
+
+	local succ, val = pcall(decoderFunc, str, 1)
+	if succ then return val end 
+	
+	return spon._decodeInCompatabilityMode(str, 'spon encountered error: ' .. tostring(val))
 end
 
-spon.printtable = function(tbl, indent) -- debug utility
-	if indent == nil then 
-		return spon.printtable(tbl, 0)
+spon._decodeInCompatabilityMode = function(str, message)
+	local firstChar = string_sub(str, 1, 1)
+	if firstChar == '{' then
+		message = message .. '\nthis looks like it may be a pon1 encoded object, please make sure you have pon1 installed for compatability mode to work with it'
 	end
+	for k, decoder in pairs(compatability) do
+		local succ, val = pcall(decoder, str)
+		if succ then return val end
+		message = message .. '\ntrying decoder: ' .. k .. '\n\terror: ' .. tostring(val)
+	end
+	error('[spon] failed to decode string and was unable to resolve the problem in compatability mode!\n' .. message .. '\n\nthe encoded object: ' .. tostring(str:sub(1, 100)))
+end
+
+spon.printtable = function(tbl, indent, cache) -- debug utility
+	if indent == nil then 
+		return spon.printtable(tbl, 0, {})
+	end
+	if cache[tbl] then return end
+	cache[tbl] = true
 	local lpad = string.format('%'..indent..'s', '')
 
 	for k,v in pairs(tbl) do
 		print(lpad .. '- ' .. string_sub(type(k), 1, 1) .. ':' .. tostring(k) .. ' = ' .. string_sub(type(v), 1, 1) .. ':' .. tostring(v))
 		if type(v) == 'table' then
-			spon.printtable(v, indent + 4)
+			spon.printtable(v, indent + 4, cache)
 		end
 	end
 end
+
+-- todo: finish writing entity, angle, vector decoders
 
 return spon
