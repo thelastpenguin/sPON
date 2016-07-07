@@ -55,6 +55,8 @@ local math_ceil = math.ceil
 local next = next 
 local ipairs = ipairs 
 local pairs = pairs 
+local Angle = Angle
+local Vector = Vector
 
 -- the global table for the encoder
 local spon = {}
@@ -272,6 +274,36 @@ decoder['f'] = function(str, index) return false, index + 1 end
 decoder['@'] = function(str, index)
 	local digitCount = hex_cache[string_sub(str, index+1, index+1)]
 	return cache[tonumber(string_sub(str, index + 2, index + 1 + digitCount), 16)], index + (2 + digitCount)
+end
+
+decoder['A'] = function(str, index)
+	local p, y, r, char
+	
+	char = string_sub(str, index, index)
+	p, index = decoder[char](str, index + 1)
+	
+	char = string_sub(str, index, index)
+	y, index = decoder[char](str, index + 1)
+	
+	char = string_sub(str, index, index)
+	r, index = decoder[char](str, index + 1)
+	
+	return Angle(p, y, r), index
+end
+
+decoder['V'] = function(str, index)
+	local x, y, z, char
+	
+	char = string_sub(str, index, index)
+	x, index = decoder[char](str, index + 1)
+	
+	char = string_sub(str, index, index)
+	y, index = decoder[char](str, index + 1)
+	
+	char = string_sub(str, index, index)
+	z, index = decoder[char](str, index + 1)
+	
+	return Angle(x, y, z), index
 end
 
 decoder['('] = function(str, index)
