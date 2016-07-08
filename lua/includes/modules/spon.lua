@@ -90,7 +90,7 @@ end
 local compatability = {}
 
 do 	
-	local function safeload(lib) local _, a = pcall(require, lib) return a end 
+	local function safeload(lib) local _, a = pcall(require, lib) if not _ then return nil else return a end end 
 
 	-- von compatability
 	_G.von = _G.von or safeload('von')
