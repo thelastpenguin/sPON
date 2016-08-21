@@ -3,7 +3,7 @@
 -- spon2.lua 1.0.0 by thelastpenguin
 -- Copyright 2016 Gareth George
 --                aka thelastpenguin
--- 
+--
 -- GitHub release: https://github.com/thelastpenguin/spon
 --
 -- You may use this in any purpose / include it in any project so long as the
@@ -13,26 +13,26 @@
 --    - You properly credit the author (thelastpenguin aka gareth george) if you publish your work
 --      based on (and/or using) this.
 --
--- If you modify this code in any way this copyright still applies to the modifications or any 
+-- If you modify this code in any way this copyright still applies to the modifications or any
 -- derived pieces of code
--- 
--- The author may not be held responsibile for any damages or losses directly or indirectly caused 
+--
+-- The author may not be held responsibile for any damages or losses directly or indirectly caused
 -- by the use of spon
 -- If you disagree with any of these limitations you're free not to use the code!
--- 
 --
--- 
+--
+--
 --           -- COMPATABILITY MODE --
 -- compatability with alternative encoders:
 --    - util.TableFromJSON
 --    - von by Vericas https://github.com/vercas/vON/blob/master/von.lua
 --    - pon1 by thelastpenguin https://github.com/thelastpenguin/gLUA-Library/blob/master/pON/pON-recommended.lua
---  
+--
 --           -- DATA TYPES --
 -- All of the following data types are supported as both keys and values
 -- References are preserved i.e. if the same object appears twice it will be encoded as the same object
 -- Cycles will not result in infinite recursion
--- 
+--
 -- Data Types:
 --    - boolean
 --    - numbers (integers, floats)
@@ -40,21 +40,22 @@
 --    - table
 --    - nil
 
+if SERVER then AddCSLuaFile() end
 
 -- localized variable optimization
-local select = select 
-local format_string = string.format 
-local concat = table.concat 
-local len = string.len 
-local string_find = string.find 
-local string_sub = string.sub 
-local tonumber = tonumber 
-local tostring = tostring 
+local select = select
+local format_string = string.format
+local concat = table.concat
+local len = string.len
+local string_find = string.find
+local string_sub = string.sub
+local tonumber = tonumber
+local tostring = tostring
 local math_log = math.log
-local math_ceil = math.ceil 
-local next = next 
-local ipairs = ipairs 
-local pairs = pairs 
+local math_ceil = math.ceil
+local next = next
+local ipairs = ipairs
+local pairs = pairs
 local Angle = Angle
 local Vector = Vector
 
@@ -64,9 +65,9 @@ if _G then _G.spon = spon end
 
 --
 -- caches
--- 
+--
 
-local hex_cache = {} for i = 0, 15 do hex_cache[format_string('%x', i)] = i end 
+local hex_cache = {} for i = 0, 15 do hex_cache[format_string('%x', i)] = i end
 
 local cache = {}
 local cache_size = 0
@@ -83,14 +84,14 @@ local function empty_output_buffer(buffer, a)
 	return a
 end
 
--- 
+--
 -- COMPATABILITY MODES
--- 
+--
 
 local compatability = {}
 
-do 	
-	local function safeload(lib) local _, a = pcall(require, lib) if not _ then return nil else return a end end 
+do
+	local function safeload(lib) local _, a = pcall(require, lib) if not _ then return nil else return a end end
 
 	-- von compatability
 	_G.von = _G.von or safeload('von')
@@ -100,12 +101,12 @@ do
 	_G.pon = _G.pon or safeload('pon')
 	if pon and pon.decode then compatability.ponDecode = pon.decode end
 
-	-- json compatability 
+	-- json compatability
 	if util and util.JSONToTable then compatability.JSONToTable = util.JSONToTable end
-end 
+end
 --
 -- ENCODER FUNCTIONS
--- 
+--
 
 local encoder = {}
 
@@ -154,7 +155,7 @@ encoder['boolean'] = function(value, output, index)
 end
 
 encoder['table'] = function(value, output, index)
-	if cache[value] then 
+	if cache[value] then
 		output[index] = encoder_write_pointer(cache[value])
 		return index + 1
 	end
@@ -165,7 +166,7 @@ encoder['table'] = function(value, output, index)
 
 	local table_size = #value
 	local has_kv_component = next(value, table_size ~= 0 and table_size or nil)
-	
+
 	if table_size > 0 then
 		if has_kv_component then
 			output[index] = '('
@@ -227,7 +228,7 @@ if IsValid and FindMetaTable then
 	end
 
 	encoder['Entity'] = function(value, output, index)
-		if IsValid(value) then 
+		if IsValid(value) then
 			output[index] = 'E'
 			return encode_number(EntIndex(value), index + 1)
 		else
@@ -278,31 +279,31 @@ end
 
 decoder['A'] = function(str, index)
 	local p, y, r, char
-	
+
 	char = string_sub(str, index, index)
 	p, index = decoder[char](str, index + 1)
-	
+
 	char = string_sub(str, index, index)
 	y, index = decoder[char](str, index + 1)
-	
+
 	char = string_sub(str, index, index)
 	r, index = decoder[char](str, index + 1)
-	
+
 	return Angle(p, y, r), index
 end
 
 decoder['V'] = function(str, index)
 	local x, y, z, char
-	
+
 	char = string_sub(str, index, index)
 	x, index = decoder[char](str, index + 1)
-	
+
 	char = string_sub(str, index, index)
 	y, index = decoder[char](str, index + 1)
-	
+
 	char = string_sub(str, index, index)
 	z, index = decoder[char](str, index + 1)
-	
+
 	return Angle(x, y, z), index
 end
 
@@ -404,8 +405,8 @@ spon.decode = function(str)
 	end
 
 	local succ, val = pcall(decoderFunc, str, 1)
-	if succ then return val end 
-	
+	if succ then return val end
+
 	return spon._decodeInCompatabilityMode(str, 'spon encountered error: ' .. tostring(val))
 end
 
@@ -423,7 +424,7 @@ spon._decodeInCompatabilityMode = function(str, message)
 end
 
 spon.printtable = function(tbl, indent, cache) -- debug utility
-	if indent == nil then 
+	if indent == nil then
 		return spon.printtable(tbl, 0, {})
 	end
 	if cache[tbl] then return end
