@@ -1,4 +1,3 @@
-
 --           -- COPYRIGHT HEADER --
 -- spon2.lua 1.0.0 by thelastpenguin
 -- Copyright 2016 Gareth George
@@ -118,11 +117,11 @@ end
 
 encoder['number'] = function(value, output, index)
 	if value % 1 == 0 then
-		if value == 0 then return 'I0' end
-		if value < 0 then
+		if value == 0 then
+			output[index] = 'I0'
+		elseif value < 0 then
 			output[index] = format_string('i%x%x', math_ceil(math_log(-value+1) / (log16)), -value)
 		else
-			output[index] = 'I0'
 			output[index] = format_string('I%x%x', math_ceil(math_log(value+1) / (log16)), value)
 		end
 	else
@@ -216,8 +215,8 @@ if IsValid and FindMetaTable then
 	encoder['Vector'] = function(value, output, index)
 		output[index] = 'V'
 		index = encode_number(value.x, output, index + 1)
-		index = encode_number(value.x, output, index)
-		return encode_number(value.x, output, index)
+		index = encode_number(value.y, output, index)
+		return encode_number(value.z, output, index)
 	end
 
 	encoder['Angle'] = function(value, output, index)
@@ -230,7 +229,7 @@ if IsValid and FindMetaTable then
 	encoder['Entity'] = function(value, output, index)
 		if IsValid(value) then
 			output[index] = 'E'
-			return encode_number(EntIndex(value), index + 1)
+			return encode_number(EntIndex(value), output, index + 1)
 		else
 			return '#'
 		end
@@ -261,12 +260,12 @@ end
 -- decoder for an integer value
 decoder['I'] = function(str, index, cache)
 	local digitCount = hex_cache[string_sub(str, index+1, index+1)]
-	if digitCount == 0 then return 0, index + 1 end
+	if digitCount == 0 then return 0, index + 2 end
 	return tonumber(string_sub(str, index + 2, index + 1 + digitCount), 16), index + (2 + digitCount)
 end
 decoder['i'] = function(str, index, cache)
 	local digitCount = hex_cache[string_sub(str, index+1, index+1)]
-	if digitCount == 0 then return 0, index + 1 end
+	if digitCount == 0 then return 0, index + 2 end
 	return -tonumber(string_sub(str, index + 2, index + 1 + digitCount), 16), index + (2 + digitCount)
 end
 -- decoder for a boolean
@@ -280,14 +279,15 @@ end
 decoder['A'] = function(str, index)
 	local p, y, r, char
 
-	char = string_sub(str, index, index)
+	-- Skip prefix 'A', go to first property
+	char = string_sub(str, index + 1, index + 1)
 	p, index = decoder[char](str, index + 1)
 
 	char = string_sub(str, index, index)
-	y, index = decoder[char](str, index + 1)
+	y, index = decoder[char](str, index)
 
 	char = string_sub(str, index, index)
-	r, index = decoder[char](str, index + 1)
+	r, index = decoder[char](str, index)
 
 	return Angle(p, y, r), index
 end
@@ -295,16 +295,27 @@ end
 decoder['V'] = function(str, index)
 	local x, y, z, char
 
-	char = string_sub(str, index, index)
+	-- Skip prefix 'V', go to first property
+	char = string_sub(str, index + 1, index + 1)
 	x, index = decoder[char](str, index + 1)
 
 	char = string_sub(str, index, index)
-	y, index = decoder[char](str, index + 1)
+	y, index = decoder[char](str, index)
 
 	char = string_sub(str, index, index)
-	z, index = decoder[char](str, index + 1)
+	z, index = decoder[char](str, index)
 
-	return Angle(x, y, z), index
+	return Vector(x, y, z), index
+end
+
+decoder['E'] = function(str, index)
+	local entid, char
+
+	-- Skip prefix 'E', go to entity index
+	char = string_sub(str, index + 1, index + 1)
+	entid, index = decoder[char](str, index + 1)
+
+	return Entity(entid), index
 end
 
 decoder['('] = function(str, index)
