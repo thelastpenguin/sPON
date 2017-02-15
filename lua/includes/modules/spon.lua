@@ -260,14 +260,14 @@ decoder['T'] = function(str, index, cache)
 end
 -- decoder for an integer value
 decoder['I'] = function(str, index, cache)
-	local digitCount = hex_cache[string_sub(str, index+1, index+1)]
-	if digitCount == 0 then return 0, index + 1 end
-	return tonumber(string_sub(str, index + 2, index + 1 + digitCount), 16), index + (2 + digitCount)
+    local digitCount = hex_cache[string_sub(str, index+1, index+1)]
+    if digitCount == 0 then return 0, index + 2 end
+    return tonumber(string_sub(str, index + 2, index + 1 + digitCount), 16), index + (2 + digitCount)
 end
 decoder['i'] = function(str, index, cache)
-	local digitCount = hex_cache[string_sub(str, index+1, index+1)]
-	if digitCount == 0 then return 0, index + 1 end
-	return -tonumber(string_sub(str, index + 2, index + 1 + digitCount), 16), index + (2 + digitCount)
+    local digitCount = hex_cache[string_sub(str, index+1, index+1)]
+    if digitCount == 0 then return 0, index + 2 end
+    return -tonumber(string_sub(str, index + 2, index + 1 + digitCount), 16), index + (2 + digitCount)
 end
 -- decoder for a boolean
 decoder['t'] = function(str, index) return true, index + 1 end
