@@ -88,21 +88,22 @@ end
 --
 
 local compatability = {}
+if false then -- you can re-enable this in your version if you so desire.
+	do
+		local function safeload(lib) local _, a = pcall(require, lib) if not _ then return nil else return a end end
 
-do
-	local function safeload(lib) local _, a = pcall(require, lib) if not _ then return nil else return a end end
+		-- von compatability
+		_G.von = _G.von or safeload('von')
+		if von and von.serialize then compatability.vonDeserialize = von.deserialize end
 
-	-- von compatability
-	_G.von = _G.von or safeload('von')
-	if von and von.serialize then compatability.vonDeserialize = von.deserialize end
+		-- pon compatability
+		_G.pon = _G.pon or safeload('pon')
+		if pon and pon.decode then compatability.ponDecode = pon.decode end
 
-	-- pon compatability
-	_G.pon = _G.pon or safeload('pon')
-	if pon and pon.decode then compatability.ponDecode = pon.decode end
-
-	-- json compatability
-	if util and util.JSONToTable then compatability.JSONToTable = util.JSONToTable end
-end
+		-- json compatability
+		if util and util.JSONToTable then compatability.JSONToTable = util.JSONToTable end
+	end
+end 
 --
 -- ENCODER FUNCTIONS
 --
